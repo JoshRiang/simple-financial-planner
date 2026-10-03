@@ -1,28 +1,32 @@
-/// VECTOR Finance — balance, burn rate, runway.
+/// Simple Financial Planner — balance, burn rate, runway.
 ///
-/// Server-backed so the numbers survive a reinstall and the calendar can see
-/// real daily burn. The maths mirrors the existing Vector planner: the app
-/// never auto-adjusts the user's daily budget, it only computes and reports.
+/// A standalone portfolio build: fully usable offline. It tries the optional
+/// sync server first, and when that is unreachable (the normal case on a fresh
+/// install) it falls back silently to the on-device ledger in
+/// SharedPreferences, staying fully editable. The maths mirrors the classic
+/// planner rule: the app never auto-adjusts the user's daily budget, it only
+/// computes and reports.
+///
+///   avg_daily   = total_spent_30d / days_with_spend
+///   runway_days = balance / avg_daily
 library;
 
 // ImageFilter comes from dart:ui; importing it explicitly is
 // unambiguous and costs nothing.
+import 'dart:async' show runZonedGuarded;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
+import 'local_store.dart';
 
-/// Viewer mode: the apps are a window onto the plan, Hermes is the manager and
-/// Telegram is how the user talks to it. When true the app hides every editing
-/// surface (quick-add, editors, expense entry) so exactly one writer changes
-/// the data -- two writers disagreeing is how the list and the calendar drift
-/// apart. Flip it with --dart-define=VECTOR_READ_ONLY=false for an editable
-/// build; the default is viewer.
+/// Editable by default: a portfolio install has no server and no manager, so
+/// the app itself is the only writer. Flip it with
+/// --dart-define=VECTOR_READ_ONLY=true for a viewer-only build.
 const bool kReadOnly =
-    bool.fromEnvironment('VECTOR_READ_ONLY', defaultValue: true);
-
+    bool.fromEnvironment('VECTOR_READ_ONLY', defaultValue: false);
 
 void main() {
   // In release builds a widget whose build() throws is replaced by a
@@ -30,7 +34,15 @@ void main() {
   // and the device reports no reason. Surface it instead.
   ErrorWidget.builder =
       (FlutterErrorDetails d) => _CrashReport(d);
-  runApp(const VectorFinanceApp());
+  // ErrorWidget.builder only catches build() failures. An async error (a
+  // prefs read, a network call) would otherwise escape silently and leave the
+  // spinner up forever, so the whole app runs inside a guarded zone.
+  runZonedGuarded(() {
+    runApp(const SimplePlannerApp());
+  }, (Object e, StackTrace s) {
+    // ignore: avoid_print
+    print('zone error: $e\n$s');
+  });
 }
 
 class C {
@@ -46,12 +58,12 @@ class C {
   static const textTertiary = Color(0xFF9CA3AF);
 }
 
-class VectorFinanceApp extends StatelessWidget {
-  const VectorFinanceApp({super.key});
+class SimplePlannerApp extends StatelessWidget {
+  const SimplePlannerApp({super.key});
 
   @override
   Widget build(BuildContext context) => CupertinoApp(
-        title: 'Vector Finance',
+        title: 'Simple Financial Planner',
         debugShowCheckedModeBanner: false,
         theme: CupertinoThemeData(
             primaryColor: C.accent, scaffoldBackgroundColor: C.bg),
@@ -76,8 +88,12 @@ class FinancePage extends StatefulWidget {
 class _FinancePageState extends State<FinancePage> {
   final _amountController = TextEditingController();
   final _noteController = TextEditingController();
+  final _balanceController = TextEditingController();
+  final _budgetController = TextEditingController();
+  final _store = LocalStore();
   Api? _api;
   bool _loading = true;
+  bool _usingLocal = true;
   String? _error;
   Map<String, dynamic> _data = {};
 
@@ -87,11 +103,25 @@ class _FinancePageState extends State<FinancePage> {
     Future.microtask(_bootstrap);
   }
 
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _noteController.dispose();
+    _balanceController.dispose();
+    _budgetController.dispose();
+    super.dispose();
+  }
+
   Future<void> _bootstrap() async {
+    // The ledger must be loaded before any read: rendering (or persisting) a
+    // blank default over stored data would silently wipe the user's numbers.
+    await _store.load();
     String id = Api.defaultUserId;
     try {
       final prefs = await SharedPreferences.getInstance();
-      id = prefs.getString('vector.user_id') ?? Api.defaultUserId;
+      id = prefs.getString('simple_planner.user_id') ??
+          prefs.getString('vector.user_id') ??
+          Api.defaultUserId;
     } catch (_) {
       // Prefs failure must not strand the app on a blank screen.
     }
@@ -99,44 +129,74 @@ class _FinancePageState extends State<FinancePage> {
     await _refresh();
   }
 
+  /// Server first with a short budget; any failure falls back silently to the
+  /// on-device ledger. An unreachable server is the normal portfolio case, not
+  /// an error worth a red card.
   Future<void> _refresh() async {
-    final api = _api;
-    if (api == null) return;
+    if (!_store.isLoaded) await _store.load();
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final d = await api.finance();
+      final api = _api ?? Api(userId: Api.defaultUserId);
+      _api = api;
+      final d = await api.finance().timeout(const Duration(seconds: 6));
       if (!mounted) return;
       setState(() {
         _data = d;
+        _usingLocal = false;
         _loading = false;
       });
-    } on ApiException catch (e) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
-        _error = e.message;
+        _data = _store.snapshot();
+        _usingLocal = true;
         _loading = false;
       });
     }
   }
 
   Future<void> _addExpense() async {
-    final amt = num.tryParse(_amountController.text.trim());
+    final amt = double.tryParse(_amountController.text.trim());
     if (amt == null || amt <= 0) return;
+    final note = _noteController.text.trim();
+    // Local first: the entry is saved even with no signal.
+    await _store.addExpense(amt, note);
+    if (!mounted) return;
+    _amountController.clear();
+    _noteController.clear();
+    setState(() {
+      _data = _store.snapshot();
+      _error = null;
+    });
+    // Best-effort server sync; never blocks the UI or raises an error.
+    final api = _api;
+    if (api == null) return;
     try {
-      await _api!.addExpense(amt,
-          note: _noteController.text.trim().isEmpty
-              ? null
-              : _noteController.text.trim());
-      _amountController.clear();
-      _noteController.clear();
-      await _refresh();
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.message);
+      await api.addExpense(amt, note: note.isEmpty ? null : note)
+          .timeout(const Duration(seconds: 6));
+    } catch (_) {
+      // Offline is the normal portfolio case; the entry is already saved.
     }
+  }
+
+  /// Null or unparseable fields leave the current value untouched, so a
+  /// half-filled form cannot wipe the other number.
+  Future<void> _savePlan() async {
+    final bal = double.tryParse(_balanceController.text.trim());
+    final bud = double.tryParse(_budgetController.text.trim());
+    if (bal == null && bud == null) return;
+    await _store.savePlan(balance: bal, dailyBudget: bud);
+    if (!mounted) return;
+    _balanceController.clear();
+    _budgetController.clear();
+    setState(() {
+      _data = _store.snapshot();
+      _error = null;
+    });
   }
 
   /// Read a numeric field from the finance payload, or null when it is
@@ -302,6 +362,9 @@ class _FinancePageState extends State<FinancePage> {
       const SizedBox(height: 4),
       Text('Balance ${_money(_num('balance'))}',
           style: const TextStyle(fontSize: 15, color: C.textSecondary)),
+      if (_usingLocal)
+        const Text('Offline — saved on this device',
+            style: TextStyle(fontSize: 13, color: C.textTertiary)),
       const SizedBox(height: 22),
       _runwayHero(),
       const SizedBox(height: 14),
@@ -366,9 +429,49 @@ class _FinancePageState extends State<FinancePage> {
                 _money(_num('avg_daily_spend')), 'avg per day')),
       ]),
       const SizedBox(height: 26),
-      // Viewer mode: no expense entry. Hermes logs spending from Telegram, so
-      // there is exactly one writer and the totals cannot be double-counted.
+      // Viewer mode hides every editing surface so exactly one writer changes
+      // the data. The portfolio default is editable (kReadOnly=false).
       if (!kReadOnly) ...[
+      const Text('YOUR PLAN',
+          style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1,
+              color: C.textTertiary)),
+      const SizedBox(height: 10),
+      _card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(children: [
+            CupertinoTextField(
+              controller: _balanceController,
+              placeholder: 'Balance, e.g. 3500000',
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              padding: const EdgeInsets.all(14),
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 10),
+            CupertinoTextField(
+              controller: _budgetController,
+              placeholder: 'Daily budget, e.g. 150000',
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              padding: const EdgeInsets.all(14),
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: CupertinoButton.filled(
+                onPressed: _savePlan,
+                child: const Text('Save plan'),
+              ),
+            ),
+          ]),
+        ),
+      ),
+      const SizedBox(height: 22),
       const Text('LOG AN EXPENSE',
           style: TextStyle(
               fontSize: 12,
@@ -463,7 +566,6 @@ class _FinancePageState extends State<FinancePage> {
       );
 }
 
-
 /// Shown instead of Flutter's default ErrorWidget when a widget's build throws.
 ///
 /// In release builds that default is a blank grey box that prints nothing, so a
@@ -485,7 +587,7 @@ class _CrashReport extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         child: SingleChildScrollView(
           child: Text(
-            'VECTOR crashed\n\n$msg\n\n$stack',
+            'Simple Planner ran into a problem\n\n$msg\n\n$stack',
             style: const TextStyle(color: Color(0xFFF9FAFB), fontSize: 11),
           ),
         ),

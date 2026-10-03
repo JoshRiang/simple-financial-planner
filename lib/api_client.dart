@@ -1,6 +1,7 @@
-/// Shared API client for the VECTOR Suite apps.
+/// HTTP client for the planner's optional sync server.
 ///
-/// All three apps talk to ONE backend. The LLM key lives server-side only --
+/// The app works fully offline; when a server is configured, this client
+/// syncs the ledger with it. The LLM key lives server-side only --
 /// shipping it in an APK would make it extractable with `unzip` + `strings`,
 /// so no app ever calls a model directly.
 ///
@@ -282,7 +283,7 @@ class Api {
   ///
   /// The app can add tasks, but it never PLANS: the ordering, the dependencies
   /// and the next action are decided server-side, so the same list shows up
-  /// here, in the widgets and in Hermes's own view of the work.
+  /// here, in the widget and in the server's own view of the work.
   Future<Map<String, dynamic>> addTask(
     String goalId,
     String title, {

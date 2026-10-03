@@ -1,4 +1,4 @@
-/// Tests for the VECTOR Tasks app.
+/// Tests for the planner's API client.
 ///
 /// These cover the parsing and decision logic that CI can verify without a
 /// device or a live server. They are deliberately about BEHAVIOUR (what the

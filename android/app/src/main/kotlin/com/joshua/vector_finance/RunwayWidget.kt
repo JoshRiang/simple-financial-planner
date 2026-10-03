@@ -15,7 +15,7 @@ import java.net.URL
 import kotlin.concurrent.thread
 
 /**
- * VECTOR Finance home-screen widget: how much runway is left.
+ * Simple Planner home-screen widget: how much runway is left.
  */
 class RunwayWidget : AppWidgetProvider() {
 
@@ -153,7 +153,7 @@ class RunwayWidget : AppWidgetProvider() {
             }
         }
         throw java.io.IOException(
-            "no VECTOR endpoint reachable: " + (lastError?.message ?: "unknown"))
+            "no endpoint reachable: " + (lastError?.message ?: "unknown"))
     }
 
     /** One request against one base. */

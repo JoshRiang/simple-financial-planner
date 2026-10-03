@@ -1,97 +1,59 @@
 # Simple Financial Planner
 
-**How much runway is left, and what did today actually cost?**
+How much runway is left, and what did today actually cost?
 
-A standalone, offline-first Flutter app. Install it, set a balance and a daily
-budget, log expenses — it works with no account and no server. An optional
-self-hosted sync endpoint can be injected at build time
-(`--dart-define=API_BASE=...`); when it is unreachable the app falls back
-silently to the on-device ledger instead of showing an error.
-
----
+An offline-first Flutter app for tracking spending against a plan. Set a balance, a daily budget, and a target date, log what you spend, and it tells you when the money runs out at your current pace. No account, no server, everything stays on the phone.
 
 ## Screenshots
 
-| Empty state | Runway | Today |
+| Home | History | Fresh install |
 |---|---|---|
-| ![Empty state](screenshots/empty-state.png) | ![Runway](screenshots/home-runway.png) | ![Today](screenshots/today-budget.png) |
+| ![Home tab](screenshots/home-runway.png) | ![History tab](screenshots/today-budget.png) | ![Empty state](screenshots/empty-state.png) |
 
-## The number that changes behaviour
+UI previews with sample figures, rendered from the app's own palette and layout constants.
 
-A balance tells you what you have. **Runway** tells you what to do about it.
+## What it does
 
-So the headline is not the balance — it is `days remaining at current burn`.
-Balance sits underneath as context. A balance of 3,500,000 reads as comfortable;
-"9 days" reads as urgent, and only one of those makes you act.
+The Home tab opens with a greeting and the one number that matters: what is left in the pot, with a days-to-go pill. Underneath sit three readings for the day — the daily budget, what is still free today, and what today has cost so far. A status block underneath says plainly where things stand, whether that is on track for the target date or running out early.
 
-Under a week, it turns red and says so.
+The History tab lists every expense grouped under Today, Yesterday, and older dates. Filter chips narrow the list to one category or to uncategorized spends. Removing a row asks first, so a stray tap cannot wipe anything.
 
-## What it shows
+Settings holds the plan card (balance, daily budget, target date) plus the category manager. Categories carry their own budgets and keyword lists, and new spends match themselves to a category by keyword. Whole-word, case-insensitive, longest keyword wins.
 
-- **Runway** — days left at the current average daily burn
-- **Today** — spent vs daily budget, with what is left free
-- **Last 30 days** — total spend, average per day
-- **Your plan** — balance and daily budget, editable on-device
-- **Log an expense** — amount and an optional note
-
-Until you log spending there is no honest burn rate, so the app says
-"No spending logged yet" instead of inventing a figure.
-
-## Home-screen widget
-
-A native Android widget (`RunwayWidget`) shows days of runway and what is left
-free today — without opening the app.
-
-## Offline-first, optional sync
-
-The ledger lives in `SharedPreferences` via `lib/local_store.dart`, so the app
-is fully usable with no connectivity. When a sync server is configured, the app
-tries it first with a short timeout and syncs expenses best-effort; any
-failure falls back silently to local data. An unreachable server is the normal
-case for a fresh install, not an error worth a red card.
+A spend calendar on Home colors each day by how it went against the daily budget, so a bad week is visible at a glance.
 
 ## Runway maths
 
-Pure functions in `lib/finance_math.dart`, unit-tested in CI without a device
-or a server:
+The projection is simple division. Average daily spend is total spend over days with spending; remaining balance over that average gives days left. If daily budget is set but nothing is logged yet, the budget stands in. With no spending and no budget there is no honest burn rate, so the app says so instead of inventing a figure.
 
-```
-avg_daily   = total_spent_30d / days_with_spend
-runway_days = balance / avg_daily
-```
+## Storage
 
-With no spending there is no honest burn rate, so `runway_days` is omitted and
-the UI renders "No spending logged yet".
+Everything lives in SharedPreferences under `vector.*` keys, loaded once at startup behind a guard so defaults can never overwrite saved data. Deleting the app deletes the data.
 
-## Build
+## Home-screen widget
+
+A native Android widget (`RunwayWidget`) shows days of runway and what is left free today without opening the app.
+
+## Design
+
+Cards are liquid glass: a blurred backdrop with a two-stop white gradient, a hairline border, and a soft shadow. Type follows the Apple hierarchy with tight large titles, and labels are conversational throughout — Left in the pot, Each day, Today free — because Remaining Balance reads like a bank statement and nobody opens those twice.
+
+## Build and test
 
 ```bash
 flutter pub get
 flutter test
-flutter build apk --release --target-platform android-arm64 --split-per-abi
+flutter build apk --release --split-per-abi
 ```
 
-With optional sync:
-
-```bash
-flutter build apk --release --target-platform android-arm64 --split-per-abi \
-  --dart-define=API_BASE=https://your-host \
-  --dart-define=API_KEY=your-key
-```
-
-CI (GitHub Actions) builds and tests on every push to `main`. The native
-widget reads its endpoint from string resources, so CI injects `API_BASE` /
-`API_KEY` into `strings.xml` **before** the build step.
+CI builds and tests on every push to `main`.
 
 ## Privacy
 
-Everything is stored on the device by default. No account, no tracking. If you
-point the app at your own server, your data goes only there.
+On-device only. No account, no tracking, no network calls.
 
-## Not a licensed advisor
+This app computes and reports; it is not investment advice.
 
-This app **computes and reports**. It does not recommend trades or investments.
+## License
 
-## Licence
-
-MIT
+MIT — Joshua Riangkamang

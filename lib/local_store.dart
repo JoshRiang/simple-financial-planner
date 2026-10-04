@@ -1,4 +1,4 @@
-/// On-device data layer for Simple Financial Planner.
+/// On-device data layer for SpendLog.
 ///
 /// The app tries the optional server first; when it is unreachable (the
 /// normal case for a portfolio install) everything runs from these

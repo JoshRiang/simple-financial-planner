@@ -1,4 +1,4 @@
-/// Tests for the offline finance maths in Simple Financial Planner.
+/// Tests for the offline finance maths in SpendLog.
 ///
 /// Pure-Dart behaviour tests: CI verifies these without a device or server.
 library;

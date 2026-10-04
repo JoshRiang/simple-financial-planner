@@ -1,6 +1,6 @@
-/// Simple Financial Planner — balance, burn rate and runway, offline-first.
+/// SpendLog — an offline-first spend logger with runway maths.
 ///
-/// Home + History + Settings tabs, user-managed categories with keyword
+/// Home + Log + Settings tabs, user-managed categories with keyword
 /// auto-matching, a spend calendar, all persisted on-device in
 /// SharedPreferences (keys under `simple_planner.*`, with read-fallback to
 /// the legacy `vector.*` keys so existing installs migrate silently).
@@ -23,20 +23,20 @@ void main() {
   // Build failures are caught above; async errors (a prefs read, a bad
   // decode) would otherwise escape silently, so the whole app runs guarded.
   runZonedGuarded(() {
-    runApp(const SimplePlannerApp());
+    runApp(const SpendLogApp());
   }, (Object e, StackTrace s) {
     // ignore: avoid_print
     print('zone error: $e\n$s');
   });
 }
 
-class SimplePlannerApp extends StatelessWidget {
-  const SimplePlannerApp({super.key});
+class SpendLogApp extends StatelessWidget {
+  const SpendLogApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return CupertinoApp(
-      title: 'Simple Financial Planner',
+      title: 'SpendLog',
       debugShowCheckedModeBanner: false,
       theme: const CupertinoThemeData(
         primaryColor: Color(0xFF6366F1),
@@ -924,39 +924,225 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  /// Active bottom-tab index: 0 = Home, 1 = Log, 2 = Settings.
+  int _currentTab = 0;
+
   @override
   Widget build(BuildContext context) {
     // Tab host: all three tabs read the same state object, so a spend
-    // logged on Home is instantly reflected in History and Settings.
-    return CupertinoTabScaffold(
-      tabBar: CupertinoTabBar(
-        items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(
-              icon: Icon(CupertinoIcons.house_fill), label: 'Home'),
-          BottomNavigationBarItem(
-              icon: Icon(CupertinoIcons.list_bullet), label: 'History'),
-          BottomNavigationBarItem(
-              icon: Icon(CupertinoIcons.gear), label: 'Settings'),
+    // logged anywhere is instantly reflected everywhere.
+    return CupertinoPageScaffold(
+      backgroundColor: AppColors.bgBase,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: IndexedStack(
+              index: _currentTab,
+              children: [
+                _buildHomeTab(),
+                _buildLogTab(),
+                _buildSettingsTab(),
+              ],
+            ),
+          ),
+          // Floating quick-log action: reachable from every tab, opens the
+          // same log sheet as the Home card (shared controllers + _addExpense).
+          Positioned(
+            right: 20,
+            bottom: 108,
+            child: _buildQuickLogFab(),
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 18,
+            child: _buildGlassTabBar(),
+          ),
         ],
       ),
-      tabBuilder: (context, index) {
-        return CupertinoTabView(
-          builder: (context) {
-            switch (index) {
-              case 1:
-                return _buildHistoryTab();
-              case 2:
-                return _buildSettingsTab();
-              default:
-                return _buildHomeTab();
-            }
-          },
-        );
-      },
     );
   }
 
-  /// Shared gradient page wrapper used by all three tabs.
+  /// Liquid-glass bottom bar: blurred backdrop, two-stop white gradient,
+  /// hairline border, soft shadow. The active tab gets the accent-gradient
+  /// pill; inactive tabs are quiet grey.
+  Widget _buildGlassTabBar() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(28),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xE6FFFFFF), Color(0xB8FFFFFF)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: const Color(0x33FFFFFF)),
+            boxShadow: const [
+              BoxShadow(
+                  color: Color(0x14000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 8)),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildTabItem(0, CupertinoIcons.house_fill, 'Home'),
+              _buildTabItem(1, CupertinoIcons.list_bullet, 'Log'),
+              _buildTabItem(2, CupertinoIcons.gear, 'Settings'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabItem(int index, IconData icon, String label) {
+    final selected = _currentTab == index;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() => _currentTab = index),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        decoration: BoxDecoration(
+          gradient: selected
+              ? const LinearGradient(colors: AppColors.accentGradient)
+              : null,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 22,
+                color: selected
+                    ? AppColors.textOnAccent
+                    : AppColors.textTertiary),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected
+                    ? AppColors.textOnAccent
+                    : AppColors.textTertiary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Raised accent-gradient circle with a plus: the fastest way to log.
+  Widget _buildQuickLogFab() {
+    return GestureDetector(
+      onTap: _openQuickLogSheet,
+      child: Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(colors: AppColors.accentGradient),
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x406366F1),
+                blurRadius: 16,
+                offset: Offset(0, 6)),
+          ],
+        ),
+        child: const Icon(CupertinoIcons.add,
+            color: AppColors.textOnAccent, size: 28),
+      ),
+    );
+  }
+
+  /// Quick-log sheet: amount + note, same controllers and same [_addExpense]
+  /// as the Home card, so keyword matching and persistence behave identically.
+  void _openQuickLogSheet() {
+    showCupertinoModalPopup(
+      context: context,
+      builder: (sheetCtx) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF5F5F7),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: AppColors.textTertiary.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Log a spend',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 14),
+              _GlassField(
+                controller: _expenseNoteController,
+                placeholder: 'What was it?',
+                prefix: const Padding(
+                  padding: EdgeInsets.only(left: 16, right: 8),
+                  child: Icon(CupertinoIcons.tag_solid,
+                      color: AppColors.textTertiary, size: 18),
+                ),
+              ),
+              const SizedBox(height: 10),
+              _GlassField(
+                controller: _expenseController,
+                placeholder: '0',
+                keyboardType: TextInputType.number,
+                inputFormatters: const [ThousandsSeparatorInputFormatter()],
+                prefix: const Padding(
+                  padding: EdgeInsets.only(left: 16, right: 8),
+                  child: Text('Rp',
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      )),
+                ),
+                suffix: _AccentButton(
+                  label: 'Add',
+                  width: 72,
+                  onPressed: () {
+                    _addExpense();
+                    Navigator.pop(sheetCtx);
+                    setState(() => _currentTab = 0);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Shared gradient page wrapper used by all three tabs. Bottom padding
+  /// clears the floating glass bar + quick-log FAB above it.
   Widget _tabPage({required List<Widget> children}) {
     return CupertinoPageScaffold(
       backgroundColor: AppColors.bgBase,
@@ -970,7 +1156,7 @@ class _HomePageState extends State<HomePage> {
         ),
         child: SafeArea(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 190),
             children: children,
           ),
         ),
@@ -1007,10 +1193,10 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// History tab: all expenses, newest first, grouped under Today /
+  /// Log tab: all expenses, newest first, grouped under Today /
   /// Yesterday / date dividers, with an All + per-category filter chip row.
   /// Delete is long-press + confirm only (tap does nothing — no accidents).
-  Widget _buildHistoryTab() {
+  Widget _buildLogTab() {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final yesterday = today.subtract(const Duration(days: 1));
@@ -1043,7 +1229,7 @@ class _HomePageState extends State<HomePage> {
         const Padding(
           padding: EdgeInsets.only(left: 4, top: 8, bottom: 12),
           child: Text(
-            'History',
+            'Log',
             style: TextStyle(
               fontSize: 28,
               fontWeight: FontWeight.w700,
@@ -2931,7 +3117,7 @@ class _CrashReport extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         child: SingleChildScrollView(
           child: Text(
-            'Simple Planner ran into a problem\n\n$msg\n\n$stack',
+            'SpendLog ran into a problem\n\n$msg\n\n$stack',
             style: const TextStyle(color: Color(0xFFF9FAFB), fontSize: 11),
           ),
         ),

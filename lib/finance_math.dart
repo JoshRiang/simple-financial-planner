@@ -1,4 +1,4 @@
-/// Offline finance maths for Simple Financial Planner.
+/// Offline finance maths for SpendLog.
 ///
 /// Pure functions (no Flutter, no plugins) so CI can unit-test the runway
 /// calculation without a device or a live server.

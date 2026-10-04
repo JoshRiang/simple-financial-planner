@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="vector_api_key"></string>
-    <string name="widget_label">Simple Planner</string>
+    <string name="widget_label">SpendLog</string>
     <string name="widget_loading">Loading&#8230;</string>
     <string name="widget_offline">Server unreachable</string>
     <string name="widget_offline_hint">Tap to retry</string>
-    <string name="widget_description">Runway from Simple Planner</string>
+    <string name="widget_description">Runway from SpendLog</string>
     <string name="widget_all_clear">All clear</string>
-    <string name="widget_ask">Open planner</string>
+    <string name="widget_ask">Open logger</string>
     <string name="vector_api_base">http://100.89.180.23:8790</string>
     <string name="vector_user_id">josh</string>
 </resources>

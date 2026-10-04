@@ -15,7 +15,7 @@ import java.net.URL
 import kotlin.concurrent.thread
 
 /**
- * Simple Planner home-screen widget: how much runway is left.
+ * SpendLog home-screen widget: how much runway is left.
  */
 class RunwayWidget : AppWidgetProvider() {
 

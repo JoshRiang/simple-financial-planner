@@ -199,10 +199,12 @@ class _HomePageState extends State<HomePage> {
   final TextEditingController _expenseController = TextEditingController();
   final TextEditingController _expenseNoteController = TextEditingController();
   final TextEditingController _targetDateController = TextEditingController();
+  final TextEditingController _userNameController = TextEditingController();
 
   double _currentBalance = 0;
   double _dailyBudget = 0;
   DateTime? _targetDate;
+  String _userName = '';
   final List<Map<String, dynamic>> _expenses = [];
   final List<Category> _categories = [];
 
@@ -215,6 +217,7 @@ class _HomePageState extends State<HomePage> {
   static const _kBalance = 'vector.balance';
   static const _kDailyBudget = 'vector.daily_budget';
   static const _kTargetDateIso = 'vector.target_date_iso';
+  static const _kUserName = 'vector.user_name';
   static const _kExpensesJson = 'vector.expenses_json';
   static const _kCategoriesJson = 'vector.categories_json';
 
@@ -238,6 +241,7 @@ class _HomePageState extends State<HomePage> {
     _expenseController.dispose();
     _expenseNoteController.dispose();
     _targetDateController.dispose();
+    _userNameController.dispose();
     for (final c in _catNameCtrls.values) {
       c.dispose();
     }
@@ -264,6 +268,7 @@ class _HomePageState extends State<HomePage> {
       final prefs = await SharedPreferences.getInstance();
       final loadedBalance = prefs.getDouble(_kBalance) ?? 0.0;
       final loadedDailyBudget = prefs.getDouble(_kDailyBudget) ?? 0.0;
+      final loadedUserName = prefs.getString(_kUserName) ?? '';
 
       DateTime? loadedTargetDate;
       final targetIso = prefs.getString(_kTargetDateIso);
@@ -337,6 +342,10 @@ class _HomePageState extends State<HomePage> {
         _currentBalance = loadedBalance;
         _dailyBudget = loadedDailyBudget;
         _targetDate = loadedTargetDate;
+        _userName = loadedUserName;
+        if (loadedUserName.isNotEmpty) {
+          _userNameController.text = loadedUserName;
+        }
         _expenses
           ..clear()
           ..addAll(loadedExpenses);
@@ -550,6 +559,22 @@ class _HomePageState extends State<HomePage> {
     final e = DateTime(end.year, end.month, end.day);
     final diff = e.difference(today).inDays;
     return diff < 0 ? 0 : diff;
+  }
+
+  void _setUserName() {
+    final value = _userNameController.text.trim();
+    setState(() => _userName = value);
+    _saveUserName();
+  }
+
+  Future<void> _saveUserName() async {
+    if (!_dataLoaded) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kUserName, _userName);
+    } catch (_) {
+      // ignore
+    }
   }
 
   void _setBalance() {
@@ -945,17 +970,15 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-          // Floating quick-log action: reachable from every tab, opens the
-          // same log sheet as the Home card (shared controllers + _addExpense).
-          Positioned(
-            right: 20,
-            bottom: 108,
-            child: _buildQuickLogFab(),
-          ),
+          // Floating quick-log action removed: the "Log a spend" card on
+          // Home covers quick entry, so the FAB was dead weight.
+          // Keyboard inset: when a text field has focus, the OS keyboard
+          // pushes the whole Stack up, so the glass bar rides above it
+          // instead of hiding underneath.
           Positioned(
             left: 16,
             right: 16,
-            bottom: 18,
+            bottom: 18 + MediaQuery.of(context).viewInsets.bottom,
             child: _buildGlassTabBar(),
           ),
         ],
@@ -1041,6 +1064,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// Raised accent-gradient circle with a plus: the fastest way to log.
+  /// Unused since the FAB was dropped from the tab host (the Home
+  /// "Log a spend" card covers entry) but kept so the quick-log sheet
+  /// can come back without rewriting it.
+  // ignore: unused_element
   Widget _buildQuickLogFab() {
     return GestureDetector(
       onTap: _openQuickLogSheet,
@@ -1164,8 +1191,9 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Home tab: the pre-tabs screen, unchanged (header, hero, input,
-  /// plan setup, calendar, recent list).
+  /// Home tab: header (with personal greeting), hero, quick expense input,
+  /// calendar, category cards. Plan setup and history live in Settings
+  /// and the Log tab, so Home stays lean.
   Widget _buildHomeTab() {
     return _tabPage(
       children: [
@@ -1180,15 +1208,11 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 20),
         _buildExpenseInput(),
         const SizedBox(height: 20),
-        _buildBudgetSetup(),
-        const SizedBox(height: 20),
         _buildCalendar(),
         const SizedBox(height: 20),
         _buildCategorySpendCard(),
         const SizedBox(height: 20),
         _buildCategoryBudgetLeftCard(),
-        const SizedBox(height: 24),
-        _buildExpensesList(),
       ],
     );
   }
@@ -1503,10 +1527,69 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ),
+        _buildNameCard(),
+        const SizedBox(height: 20),
         _buildBudgetSetup(),
         const SizedBox(height: 20),
         _buildCategoryManager(),
       ],
+    );
+  }
+
+  /// Your-name card: one text field + Set. The Home header greets with
+  /// this name when set ("Hi Josh"); otherwise it falls back to the
+  /// time-of-day greeting.
+  Widget _buildNameCard() {
+    return _GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(CupertinoIcons.person_fill,
+                    color: AppColors.accent, size: 18),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Your name',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: _GlassField(
+                  controller: _userNameController,
+                  placeholder: 'What should we call you?',
+                  prefix: const Padding(
+                    padding: EdgeInsets.only(left: 16, right: 8),
+                    child: Icon(CupertinoIcons.person,
+                        color: AppColors.textTertiary, size: 18),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _AccentButton(
+                label: 'Set',
+                onPressed: _setUserName,
+                width: 72,
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1874,11 +1957,14 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildHeader() {
     final now = DateTime.now();
-    final greeting = now.hour < 12
+    final timeGreeting = now.hour < 12
         ? 'Good morning'
         : now.hour < 18
             ? 'Good afternoon'
             : 'Good evening';
+    // Personal when we know the name ("Hi Josh"); otherwise time-of-day.
+    final greeting =
+        _userName.isNotEmpty ? 'Hi $_userName' : timeGreeting;
     return Padding(
       padding: const EdgeInsets.only(left: 4, top: 8, bottom: 4),
       child: Column(
